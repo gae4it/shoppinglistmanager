@@ -7,10 +7,14 @@ import { createServer } from "http";
 // server/storage.ts
 var MemStorage = class {
   users;
+  orders;
   currentId;
+  currentOrderId;
   constructor() {
     this.users = /* @__PURE__ */ new Map();
+    this.orders = /* @__PURE__ */ new Map();
     this.currentId = 1;
+    this.currentOrderId = 1;
   }
   async getUser(id) {
     return this.users.get(id);
@@ -26,57 +30,47 @@ var MemStorage = class {
     this.users.set(id, user);
     return user;
   }
+  async createOrder(insertOrder) {
+    const id = this.currentOrderId++;
+    const order = {
+      ...insertOrder,
+      id,
+      createdAt: /* @__PURE__ */ new Date()
+    };
+    this.orders.set(id, order);
+    return order;
+  }
+  async getOrders() {
+    return Array.from(this.orders.values());
+  }
 };
 var storage = new MemStorage();
 
-// shared/schema.ts
-import { pgTable, text, serial } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
-var orders = pgTable("orders", {
-  id: serial("id").primaryKey(),
-  customerName: text("customer_name").notNull(),
-  customerEmail: text("customer_email").notNull(),
-  customerPhone: text("customer_phone").notNull(),
-  customerAddress: text("customer_address").notNull(),
-  customerNumber: text("customer_number").notNull(),
-  customerIntercom: text("customer_intercom"),
-  deliveryInstructions: text("delivery_instructions"),
-  notes: text("notes"),
-  items: text("items").notNull()
-});
-var insertOrderSchema = createInsertSchema(orders).pick({
-  customerName: true,
-  customerEmail: true,
-  customerPhone: true,
-  customerAddress: true,
-  customerNumber: true,
-  customerIntercom: true,
-  deliveryInstructions: true,
-  notes: true,
-  items: true
-});
-var emailOrderSchema = z.object({
-  customerName: z.string().min(2, "Nome richiesto"),
-  customerEmail: z.string().email("Email non valida"),
-  customerPhone: z.string().min(6, "Telefono richiesto"),
-  customerAddress: z.string().min(5, "Indirizzo richiesto"),
-  customerNumber: z.string().min(1, "Numero civico richiesto"),
-  customerIntercom: z.string().optional(),
-  deliveryInstructions: z.string().optional(),
-  notes: z.string().optional(),
-  items: z.string()
-});
-
 // server/routes.ts
+import { z } from "zod";
+var emailOrderSchema = z.object({
+  email: z.string().email(),
+  items: z.array(z.string()).min(1)
+});
 async function registerRoutes(app2) {
   app2.post("/api/orders", async (req, res) => {
     try {
       const orderData = emailOrderSchema.parse(req.body);
       const order = await storage.createOrder(orderData);
+      console.log(`Order created: ${JSON.stringify(order)}`);
       res.json(order);
     } catch (error) {
+      console.error("Order creation error:", error);
       res.status(400).json({ message: "Invalid order data" });
+    }
+  });
+  app2.get("/api/orders", async (req, res) => {
+    try {
+      const orders = await storage.getOrders();
+      res.json(orders);
+    } catch (error) {
+      console.error("Get orders error:", error);
+      res.status(500).json({ message: "Failed to fetch orders" });
     }
   });
   const httpServer = createServer(app2);
@@ -235,11 +229,7 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
   const port = 5e3;
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true
-  }, () => {
+  server.listen(port, () => {
     log(`serving on port ${port}`);
   });
 })();
